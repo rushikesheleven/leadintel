@@ -1,0 +1,90 @@
+[project]
+name = "leadintel"
+version = "0.1.0"
+description = "Free, open-source MCP server for AI-powered B2B lead generation and business intelligence."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Rushikesh Suradkar", email = "rushikesheleven@gmail.com" }
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "lead-generation",
+    "business-intelligence",
+    "b2b",
+    "seo-audit",
+    "competitor-analysis",
+    "ollama",
+    "local-first",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "beautifulsoup4>=4.15.0",
+    "httpx>=0.28.1",
+    "mcp[cli]>=2.3.0",
+    "openpyxl>=3.1.5",
+    "pydantic>=2.14.2",
+    "python-dotenv>=1.2.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/example/leadintel"
+Repository = "https://github.com/example/leadintel"
+"Bug Tracker" = "https://github.com/example/leadintel/issues"
+Documentation = "https://github.com/example/leadintel#readme"
+
+[project.scripts]
+leadintel-server = "leadintel.server:mcp.run"
+
+[project.optional-dependencies]
+# Ollama integration — install ollama separately: https://ollama.ai
+ollama = []
+# Legacy optional third-party keys (kept for future providers)
+gemini = ["google-generativeai>=0.8"]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "pytest-httpx>=0.36.2",
+    "respx>=0.23.1",
+    "ruff>=0.9.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
