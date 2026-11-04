@@ -30,6 +30,7 @@ class ProviderRegistry:
         if not providers:
             raise ValueError("ProviderRegistry requires at least one provider.")
         self._providers = providers
+        self.last_error: str | None = None
 
     @property
     def primary(self) -> BusinessProvider:
@@ -56,7 +57,15 @@ class ProviderRegistry:
             (businesses, provider_name) — the name of the provider that
             actually returned data.
         """
+        self.last_error = None
         for provider in self._providers:
+            # If a location was provided for live search, do not fall back to synthetic demo data
+            if location and provider.name == "demo" and len(self._providers) > 1:
+                logger.debug(
+                    "Skipping DemoProvider for live search with location '%s'.", location
+                )
+                continue
+
             try:
                 results = await provider.search(
                     query=query,
@@ -71,9 +80,24 @@ class ProviderRegistry:
                         len(results),
                     )
                     return results, provider.name
+
+                # If a live provider successfully executed search and found 0 results for a location,
+                # do not fall through to demo data — report 0 live results.
+                if location and provider.name != "demo":
+                    logger.debug(
+                        "Live provider '%s' returned 0 results for location '%s'.",
+                        provider.name,
+                        location,
+                    )
+                    return [], provider.name
+
                 logger.debug("Provider '%s' returned 0 results, trying next.", provider.name)
             except Exception as exc:  # noqa: BLE001
+                self.last_error = str(exc)
                 logger.warning("Provider '%s' failed: %s", provider.name, exc)
+                # In live mode with a location, do not swallow the error into demo data
+                if location and provider.name != "demo":
+                    return [], provider.name
 
         return [], self._providers[-1].name
 
@@ -86,12 +110,20 @@ class ProviderRegistry:
         Returns:
             (business_or_none, provider_name)
         """
+        self.last_error = None
         for provider in self._providers:
+            # Route by ID prefix when known
+            if business_id.startswith("osm_") and provider.name == "demo":
+                continue
+            if business_id.startswith("demo_") and provider.name != "demo":
+                continue
+
             try:
                 result = await provider.get_details(business_id)
                 if result is not None:
                     return result, provider.name
             except Exception as exc:  # noqa: BLE001
+                self.last_error = str(exc)
                 logger.warning(
                     "Provider '%s' get_details failed: %s", provider.name, exc
                 )

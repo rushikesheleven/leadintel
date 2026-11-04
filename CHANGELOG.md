@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2026-11-04
+
+### Fixed
+- **OSM Policy Compliance — Overpass headers**: Removed the `Referer: https://overpass-turbo.eu/`
+  header from Overpass API requests. LeadIntel was falsely presenting itself as the Overpass Turbo
+  web application. The header is now omitted entirely; `User-Agent` correctly identifies the client
+  as `LeadIntel/0.1.1`.
+- **OSM Policy Compliance — Nominatim User-Agent**: Updated `User-Agent` to
+  `LeadIntel/0.1.1 (open-source B2B lead-generation MCP server; https://github.com/example/leadintel)`
+  per the [Nominatim Acceptable Use Policy](https://operations.osmfoundation.org/policies/nominatim/).
+- **Nominatim global rate-limit**: Introduced a module-level `asyncio.Lock`-protected rate-limiter
+  (`_nominatim_rate_limit()`) that enforces a minimum 1-second gap between *all* Nominatim HTTP
+  requests across every `OverpassProvider` instance in the same process. Previously each instance
+  had its own independent clock, allowing concurrent tool calls to exceed the 1 req/s policy limit.
+- **Nominatim geocode cache**: Added a 24-hour in-process geocode cache (`_nominatim_geocode_cache`)
+  keyed by location string. Repeated searches for the same city (e.g. multiple category searches for
+  "Pune") reuse the cached bounding box without issuing redundant geocode requests.
+- **Silent fallback eliminated**: Live searches with a location parameter no longer silently fall
+  through to `DemoProvider`; errors and zero-result live searches are reported with an explicit
+  `source="openstreetmap"` and a human-readable `note`.
+- **Overpass query robustness**:
+  - POI queries restricted to `node` and `way` elements (heavy administrative `relation` objects
+    excluded) to prevent server-side timeouts.
+  - Search bounding box centred on the geocoded coordinate with the configured `radius_m` (5 km
+    default) instead of the multi-hundred-kilometre administrative boundary returned by Nominatim.
+  - Mirror endpoints (`lz4`, `z`, `private.coffee`) tried automatically when the primary server
+    returns 502 or times out.
+- **Nominatim POI fallback**: When all Overpass mirrors are at capacity or timeout, the provider
+  seamlessly falls back to a live Nominatim POI search under the same ODbL licence.
+- **Environment file discovery** (`config.py`): `.env` is now located via
+  `LEADINTEL_ENV_FILE` → `cwd` → repo root → ancestor walk, so Claude Desktop subprocess launches
+  from `/` or `~` correctly pick up project configuration.
+
+### Changed
+- `BusinessSearchResult` model gains an optional `error` field surfacing provider error details.
+- `search_businesses` MCP tool response includes a human-readable `note` for live results, zero
+  results, and error conditions so callers can distinguish live OSM data from empty results.
+
+---
+
 ## [0.1.0] - 2026-11-04
 
 ### Added

@@ -102,6 +102,10 @@ class BusinessSearchResult(BaseModel):
         default=None,
         description="Attribution string — required when source is 'openstreetmap'.",
     )
+    error: Optional[str] = Field(
+        default=None,
+        description="Error details if the search provider encountered an issue",
+    )
 
     @field_serializer("retrieved_at")
     def serialise_retrieved_at(self, v: datetime) -> str:

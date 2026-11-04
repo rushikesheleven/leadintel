@@ -73,6 +73,8 @@ def register(mcp: MCPServer) -> None:
         is_demo = provider_name == "demo"
 
         note: Optional[str] = None
+        error: Optional[str] = None
+
         if is_demo:
             note = (
                 "ℹ️ Demo data returned. "
@@ -80,10 +82,16 @@ def register(mcp: MCPServer) -> None:
                 "(no API key required)."
             )
         elif is_osm:
-            note = (
-                f"✅ Live data from OpenStreetMap. "
-                f"Attribution required: {OSM_ATTRIBUTION}"
-            )
+            if getattr(_registry, "last_error", None):
+                error = _registry.last_error
+                note = f"⚠️ OpenStreetMap live search encountered an issue: {_registry.last_error}"
+            elif len(businesses) == 0:
+                note = f"No businesses found matching your criteria in OpenStreetMap near '{location}'."
+            else:
+                note = (
+                    f"✅ Live data from OpenStreetMap. "
+                    f"Attribution required: {OSM_ATTRIBUTION}"
+                )
 
         result = BusinessSearchResult(
             query=query,
@@ -95,6 +103,7 @@ def register(mcp: MCPServer) -> None:
             provider=provider_name,
             attribution=OSM_ATTRIBUTION if is_osm else None,
             note=note,
+            error=error,
         )
 
         return result.model_dump(mode="json")

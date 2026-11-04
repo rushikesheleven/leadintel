@@ -13,10 +13,38 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from the working directory if present
-_env_file = Path.cwd() / ".env"
-if _env_file.exists():
-    load_dotenv(_env_file)
+
+# Load .env with intelligent path resolution (handles cwd, repo root, Claude Desktop launch)
+def _load_env_configuration() -> None:
+    # 1. Explicit path in env var
+    custom_path = os.environ.get("LEADINTEL_ENV_FILE")
+    if custom_path:
+        p = Path(custom_path).expanduser().resolve()
+        if p.is_file():
+            load_dotenv(p)
+            return
+
+    # 2. Current working directory
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.is_file():
+        load_dotenv(cwd_env)
+        return
+
+    # 3. Project root (relative to this file: src/leadintel/config.py -> repo root)
+    repo_root_env = Path(__file__).resolve().parent.parent.parent / ".env"
+    if repo_root_env.is_file():
+        load_dotenv(repo_root_env)
+        return
+
+    # 4. Search upward from current working directory
+    for parent in Path.cwd().parents:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            load_dotenv(candidate)
+            return
+
+
+_load_env_configuration()
 
 
 @dataclass(frozen=True)
