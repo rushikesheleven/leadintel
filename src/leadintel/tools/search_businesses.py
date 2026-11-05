@@ -11,7 +11,6 @@ from ..config import settings
 from ..models.business import Business, BusinessSearchResult
 from ..providers import build_registry
 from ..services.website_opportunity import batch_evaluate_websites
-from ..storage.db import save_businesses
 
 logger = logging.getLogger(__name__)
 
@@ -208,78 +207,99 @@ def register(mcp: MCPServer) -> None:
                 - osm_tags
               provider, attribution, retrieved_at, note, error
         """
-        limit = max(1, min(limit, 50))
+        try:
+            limit = max(1, min(limit, 50))
 
-        raw_businesses, provider_name = await _registry.search(
-            query=query,
-            location=location,
-            category=category,
-            limit=limit,
-            latitude=latitude,
-            longitude=longitude,
-            radius_meters=radius_meters,
-            wider_metro=wider_metro,
-        )
-
-        is_osm = provider_name == "openstreetmap"
-        is_demo = provider_name == "demo"
-
-        # 1. Evaluate website opportunity and verify presence
-        evaluated_businesses = await batch_evaluate_websites(
-            businesses=raw_businesses,
-            location=location,
-            research_missing=research_websites,
-            max_concurrent=5,
-        )
-
-        # 2. Compute data confidence for each record
-        for b in evaluated_businesses:
-            b.data_confidence = _compute_data_confidence(b)
-
-        # 3. Apply multi-criteria ranking and populate explanations
-        ranked_businesses = _apply_ranking(
-            businesses=evaluated_businesses,
-            sort_by=sort_by or "highest_website_opportunity",
-        )
-
-        note: Optional[str] = None
-        error: Optional[str] = None
-
-        if is_demo:
-            note = (
-                "ℹ️ Demo data returned. "
-                "Provide a 'location' parameter to enable live OpenStreetMap search "
-                "(no API key required)."
+            raw_businesses, provider_name = await _registry.search(
+                query=query,
+                location=location,
+                category=category,
+                limit=limit,
+                latitude=latitude,
+                longitude=longitude,
+                radius_meters=radius_meters,
+                wider_metro=wider_metro,
             )
-        elif is_osm:
-            if getattr(_registry, "last_error", None):
-                error = _registry.last_error
-                note = f"⚠️ OpenStreetMap live search encountered an issue: {_registry.last_error}"
-            elif len(ranked_businesses) == 0:
-                note = f"No businesses found matching your criteria in OpenStreetMap near '{location}'."
-            else:
+
+            is_osm = provider_name == "openstreetmap"
+            is_demo = provider_name == "demo"
+
+            # 1. Evaluate website opportunity and verify presence
+            evaluated_businesses = await batch_evaluate_websites(
+                businesses=raw_businesses,
+                location=location,
+                research_missing=research_websites,
+                max_concurrent=5,
+            )
+
+            # 2. Compute data confidence for each record
+            for b in evaluated_businesses:
+                b.data_confidence = _compute_data_confidence(b)
+
+            # 3. Apply multi-criteria ranking and populate explanations
+            ranked_businesses = _apply_ranking(
+                businesses=evaluated_businesses,
+                sort_by=sort_by or "highest_website_opportunity",
+            )
+
+            note: Optional[str] = None
+            error: Optional[str] = None
+
+            if is_demo:
                 note = (
-                    f"✅ Live data from OpenStreetMap with website opportunity intelligence. "
-                    f"Attribution required: {OSM_ATTRIBUTION}"
+                    "ℹ️ Demo data returned. "
+                    "Provide a 'location' parameter to enable live OpenStreetMap search "
+                    "(no API key required)."
                 )
+            elif is_osm:
+                if getattr(_registry, "last_error", None):
+                    error = _registry.last_error
+                    note = f"⚠️ OpenStreetMap live search encountered an issue: {_registry.last_error}"
+                elif len(ranked_businesses) == 0:
+                    note = f"No businesses found matching your criteria in OpenStreetMap near '{location}'."
+                else:
+                    note = (
+                        f"✅ Live data from OpenStreetMap with website opportunity intelligence. "
+                        f"Attribution required: {OSM_ATTRIBUTION}"
+                    )
 
-        result = BusinessSearchResult(
-            query=query,
-            location=location,
-            category=category,
-            search_center=_registry.last_search_center,
-            radius_meters=_registry.last_radius_meters,
-            sort_by=sort_by or "highest_website_opportunity",
-            total_found=len(ranked_businesses),
-            businesses=ranked_businesses,
-            source=provider_name,
-            provider=provider_name,
-            attribution=OSM_ATTRIBUTION if is_osm else None,
-            note=note,
-            error=error,
-        )
+            # Safely save leads to SQLite
+            try:
+                from ..storage.db import save_businesses
+                save_businesses(ranked_businesses)
+            except Exception as db_err:
+                logger.error(f"Failed to save leads to SQLite: {db_err}")
 
-        # Save researched businesses into SQLite persistence
-        save_businesses(ranked_businesses)
+            serialized_businesses = [b.model_dump(mode="json") for b in ranked_businesses]
 
-        return result.model_dump(mode="json")
+            result = BusinessSearchResult(
+                query=query,
+                location=location,
+                category=category,
+                search_center=_registry.last_search_center,
+                radius_meters=_registry.last_radius_meters,
+                sort_by=sort_by or "highest_website_opportunity",
+                total_found=len(ranked_businesses),
+                businesses=ranked_businesses,
+                source=provider_name,
+                provider=provider_name,
+                attribution=OSM_ATTRIBUTION if is_osm else None,
+                note=note,
+                error=error,
+            )
+
+            result_dict = result.model_dump(mode="json")
+            result_dict["businesses"] = serialized_businesses
+            return result_dict
+
+        except Exception as e:
+            import traceback
+            logger.error(f"Fatal error in search_businesses: {e}\n{traceback.format_exc()}")
+            return {
+                "query": query,
+                "location": location,
+                "error": f"Internal execution error: {str(e)}",
+                "note": "A fatal error occurred during search execution.",
+                "total_found": 0,
+                "businesses": [],
+            }

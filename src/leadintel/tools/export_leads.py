@@ -77,8 +77,7 @@ def register(mcp: MCPServer) -> None:
 
         # Execute export
         if ext == "xlsx":
-            biz_dicts = [b.model_dump() for b in businesses]
-            abs_path = export_to_excel(businesses=biz_dicts, output_path=output_path)
+            abs_path = export_to_excel(businesses=businesses, output_path=output_path)
         elif ext == "json":
             abs_path = _write_json(businesses, output_path, provider_name)
         else:

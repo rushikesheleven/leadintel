@@ -48,7 +48,7 @@ class TestFormulaInjectionProtection:
 # ── Excel Exporter Tests ──────────────────────────────────────────────────────
 
 class TestExcelExporter:
-    def test_generates_all_7_worksheets(self):
+    def test_generates_worksheets(self):
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
             path = f.name
 
@@ -70,19 +70,15 @@ class TestExcelExporter:
             wb = openpyxl.load_workbook(saved_path)
             sheet_names = wb.sheetnames
             expected_sheets = [
-                "Dashboard Summary",
-                "Business Leads",
-                "Website Audit",
-                "Competitor Intelligence",
-                "Lead Scoring",
-                "AI Insights",
-                "Outreach",
+                "All Leads",
+                "High Website Opportunity",
+                "Data Quality Summary",
             ]
             for s in expected_sheets:
                 assert s in sheet_names
 
             # Verify formula injection sanitization in sheets
-            ws_leads = wb["Business Leads"]
+            ws_leads = wb["All Leads"]
             assert ws_leads.cell(row=2, column=1).value == "Acme Tech"
 
         finally:
@@ -96,8 +92,8 @@ class TestExcelExporter:
             saved_path = export_to_excel(output_path=path)
             assert os.path.exists(saved_path)
             wb = openpyxl.load_workbook(saved_path)
-            assert "Dashboard Summary" in wb.sheetnames
-            assert wb["Dashboard Summary"]["A1"].value is not None
+            assert "All Leads" in wb.sheetnames
+            assert wb["All Leads"]["A1"].value is not None
         finally:
             if os.path.exists(path):
                 os.unlink(path)
@@ -113,7 +109,7 @@ class TestExcelExporter:
             }
             saved_path = export_to_excel(businesses=[malicious_lead], output_path=path)
             wb = openpyxl.load_workbook(saved_path)
-            ws = wb["Business Leads"]
+            ws = wb["All Leads"]
             assert ws.cell(row=2, column=1).value.startswith("'=")
             assert ws.cell(row=2, column=2).value.startswith("'@")
             assert ws.cell(row=2, column=4).value.startswith("'+")
@@ -222,7 +218,7 @@ class TestMcpToolsStep7:
             assert data["format"] == "xlsx"
             assert os.path.exists(data["output_path"])
             wb = openpyxl.load_workbook(data["output_path"])
-            assert "Business Leads" in wb.sheetnames
+            assert "All Leads" in wb.sheetnames
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

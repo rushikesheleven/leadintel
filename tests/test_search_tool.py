@@ -1,5 +1,7 @@
 """Tests for the search_businesses MCP tool logic."""
 
+import pytest
+
 from leadintel.data.demo import DEMO_BUSINESSES, search_demo_businesses
 from leadintel.models.business import BusinessSearchResult
 
@@ -47,3 +49,30 @@ class TestSearchBusinessesLogic:
                 if isinstance(v, str):
                     assert "api_key" not in v.lower()
                     assert "secret" not in v.lower()
+
+
+@pytest.mark.asyncio
+async def test_search_businesses_tool_fatal_error_handling(monkeypatch: pytest.MonkeyPatch):
+    """Verify fatal unexpected exceptions return structured error without crashing MCP."""
+    import json
+
+    import leadintel.tools.search_businesses as sb_tool
+    from leadintel.server import mcp
+
+    # Force an unexpected exception during registry search
+    def mock_broken_search(*args, **kwargs):
+        raise RuntimeError("Simulated network kernel panic")
+
+    monkeypatch.setattr(sb_tool._registry, "search", mock_broken_search)
+
+    res = await mcp.call_tool("search_businesses", {"query": "fail", "location": "ErrorCity"})
+    content = res.content[0].text if hasattr(res.content[0], "text") else str(res.content[0])
+    parsed = json.loads(content)
+
+    assert parsed["query"] == "fail"
+    assert parsed["location"] == "ErrorCity"
+    assert "Internal execution error" in parsed["error"]
+    assert "Simulated network kernel panic" in parsed["error"]
+    assert parsed["total_found"] == 0
+    assert parsed["businesses"] == []
+

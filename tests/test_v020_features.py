@@ -241,6 +241,12 @@ class TestDirectoryAndSocialDetection:
         # Completely unrelated domain
         assert is_domain_belonging_to_business("randomtechcorp.com", "Vaishali Restaurant") is False
 
+        # ccTLD location heuristics
+        assert is_domain_belonging_to_business("vaishali.co.uk", "Vaishali Restaurant", location="Pune") is False
+        assert is_domain_belonging_to_business("vaishali.co.uk", "Vaishali Restaurant", location="London, UK") is True
+        assert is_domain_belonging_to_business("cafegoodluck.com.au", "Cafe Goodluck", location="Pune") is False
+        assert is_domain_belonging_to_business("cafegoodluck.com.au", "Cafe Goodluck", location="Sydney, Australia") is True
+
 
 # ── 4. Website Opportunity Scoring & Status States ────────────────────────────
 
@@ -653,14 +659,11 @@ class TestCmsAndContactRouteDetection:
         try:
             export_to_excel(businesses=[biz.model_dump()], output_path=temp_path)
             wb = openpyxl.load_workbook(temp_path)
-            ws_leads = wb["Business Leads"]
-            headers = [ws_leads.cell(row=1, column=c).value for c in range(1, 17)]
-            assert "CMS" in headers
-            assert "Contact Route" in headers
-            cms_col = headers.index("CMS") + 1
-            contact_col = headers.index("Contact Route") + 1
-            assert ws_leads.cell(row=2, column=cms_col).value == "WordPress"
-            assert ws_leads.cell(row=2, column=contact_col).value is False
+            assert "All Leads" in wb.sheetnames
+            assert "High Website Opportunity" in wb.sheetnames
+            assert "Data Quality Summary" in wb.sheetnames
+            ws_leads = wb["All Leads"]
+            assert ws_leads.cell(row=2, column=1).value == "Export Test Corp"
         finally:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)

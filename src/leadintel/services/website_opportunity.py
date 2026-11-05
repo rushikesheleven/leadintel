@@ -151,12 +151,23 @@ def is_directory_or_social_domain(url_or_domain: str) -> bool:
     return False
 
 
-def is_domain_belonging_to_business(domain: str, business_name: str) -> bool:
+def is_domain_belonging_to_business(
+    domain: str, business_name: str, location: Optional[str] = None
+) -> bool:
     """
     Check if a discovered domain plausibly belongs to the business.
 
     Matches significant tokens from the business name against the domain name.
     """
+    if location and domain:
+        loc_lower = location.lower()
+        # Reject UK domains for India/Pune searches
+        if domain.endswith(".co.uk") and not any(x in loc_lower for x in ["uk", "united kingdom", "london"]):
+            return False
+        # Reject AU domains for India/Pune searches
+        if domain.endswith(".com.au") and not any(x in loc_lower for x in ["au", "australia", "sydney"]):
+            return False
+
     if not domain or not business_name:
         return False
 
@@ -231,7 +242,7 @@ async def search_official_website(
                         domain = extract_domain(raw_url)
                         if not domain or is_directory_or_social_domain(domain):
                             continue
-                        if is_domain_belonging_to_business(domain, business_name):
+                        if is_domain_belonging_to_business(domain, business_name, location):
                             candidate = raw_url
                             break
     except Exception as exc:
@@ -300,7 +311,7 @@ async def evaluate_business_website(
 
     # 3. We have a candidate website URL — verify and inspect accessibility
     domain = extract_domain(website_url)
-    if not is_domain_belonging_to_business(domain, biz.name):
+    if not is_domain_belonging_to_business(domain, biz.name, location):
         biz.website_status = "website_unverified"
         biz.website_opportunity_score = 55.0
         biz.website_opportunity_explanation = (

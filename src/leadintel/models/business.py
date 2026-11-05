@@ -78,6 +78,7 @@ class Business(BaseModel):
     linkedin_url: Optional[str] = Field(default=None)
     twitter_url: Optional[str] = Field(default=None)
     facebook_url: Optional[str] = Field(default=None)
+    instagram_url: Optional[str] = Field(default=None)
 
     # Metrics
     rating: Optional[float] = Field(default=None, ge=0, le=5)
