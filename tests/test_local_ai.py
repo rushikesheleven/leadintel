@@ -266,3 +266,59 @@ class TestMcpToolsStep6:
         assert data["business_name"] == "BrightSpark Digital"
         assert "email_pitch" in data["outreach_campaign"]
         assert "linkedin_message" in data["outreach_campaign"]
+
+    @respx.mock
+    async def test_mcp_generate_outreach_with_stored_business_and_guardrails(self, monkeypatch: pytest.MonkeyPatch, tmp_path):
+        import leadintel.storage.db as db_module
+        from leadintel.models.business import Business
+
+        temp_db = str(tmp_path / "outreach_test.db")
+        monkeypatch.setattr(db_module, "DEFAULT_DB_PATH", temp_db)
+
+        # Pre-save business with CMS and missing contact route
+        stored_biz = Business(
+            id="biz_outreach_01",
+            name="Apex Dental Care",
+            category="Dentist",
+            website="https://apexdental.example",
+            website_status="website_verified",
+            website_opportunity_score=65.0,
+            website_opportunity_explanation="Built on WordPress. Missing a clear contact page.",
+            detected_cms="WordPress",
+            has_contact_route=False,
+        )
+        db_module.save_businesses([stored_biz], db_path=temp_db)
+
+        captured_requests = []
+
+        def capture_route(request):
+            captured_requests.append(request)
+            return httpx.Response(200, json={"response": SAMPLE_OLLAMA_OUTREACH_RESPONSE})
+
+        respx.post("http://localhost:11434/api/generate").mock(side_effect=capture_route)
+
+        res = await mcp.call_tool("generate_outreach", {
+            "business_name": "Apex Dental Care",
+            "business_id": "biz_outreach_01",
+            "agency_name": "LeadGen Pros",
+        })
+        content = res.content[0].text if hasattr(res.content[0], "text") else res.content[0]
+        data = json.loads(content) if isinstance(content, str) else content
+
+        assert data["business_name"] == "Apex Dental Care"
+        assert len(captured_requests) == 1
+
+        # Check prompt payload sent to Ollama
+        req_body = json.loads(captured_requests[0].content.decode("utf-8"))
+        prompt_text = req_body["prompt"]
+        system_text = req_body["system"]
+
+        # Verify strict guardrails in prompt & system prompt
+        assert "Do not fabricate business data or website problems" in prompt_text
+        assert "Base the outreach strictly on the provided website_opportunity_explanation" in prompt_text
+        assert "If the site is missing (website_not_found_after_research), pitch a new build" in prompt_text
+        assert "If a CMS is detected or a contact route is missing, mention it as a specific reason for outreach" in prompt_text
+        assert "WordPress" in prompt_text
+        assert "Missing a clear contact page" in prompt_text
+        assert "STRICT CONSTRAINTS & GUARDRAILS" in system_text
+

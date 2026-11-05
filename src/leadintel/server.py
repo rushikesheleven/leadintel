@@ -20,6 +20,7 @@ import logging
 from mcp.server.mcpserver import MCPServer
 
 from .config import settings
+from .storage.db import init_db
 from .tools import register_all
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -29,10 +30,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("leadintel")
 
+# ── Initialize Storage ────────────────────────────────────────────────────────
+try:
+    init_db()
+except Exception as exc:
+    logger.warning("Failed to initialize database during startup: %s", exc)
+
 # ── MCP Server ────────────────────────────────────────────────────────────────
 mcp = MCPServer(
     name="leadintel",
-    version="0.1.0",
+    version="0.3.0",
     instructions=(
         "LeadIntel is a free, open-source MCP server for B2B lead generation "
         "and business intelligence. It uses OpenStreetMap (free, no API key "

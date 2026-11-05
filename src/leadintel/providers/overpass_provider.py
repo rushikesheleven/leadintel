@@ -27,6 +27,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import time
 from typing import Any
 
@@ -43,7 +44,7 @@ NOMINATIM_REVERSE_ENDPOINT = "https://nominatim.openstreetmap.org/reverse"
 NOMINATIM_LOOKUP_ENDPOINT = "https://nominatim.openstreetmap.org/lookup"
 OSM_ATTRIBUTION = "Data © OpenStreetMap contributors, ODbL 1.0"
 # Descriptive User-Agent per Nominatim usage policy: https://operations.osmfoundation.org/policies/nominatim/
-USER_AGENT = "LeadIntel/0.1.1 (open-source B2B lead-generation MCP server; https://github.com/example/leadintel)"
+USER_AGENT = "LeadIntel/0.2.0 (open-source B2B lead-generation MCP server; https://github.com/example/leadintel)"
 
 OVERPASS_FALLBACK_ENDPOINTS = [
     "https://lz4.overpass-api.de/api/interpreter",
@@ -51,8 +52,8 @@ OVERPASS_FALLBACK_ENDPOINTS = [
     "https://overpass.private.coffee/api/interpreter",
 ]
 
-# Default search radius around a geocoded point, in metres
-DEFAULT_RADIUS_M = 5_000
+# Default search radius around a geocoded point, in metres (6km covers central urban core)
+DEFAULT_RADIUS_M = 6_000
 # Max radius to keep queries fast
 MAX_RADIUS_M = 50_000
 # Overpass request timeout (seconds)
@@ -64,7 +65,7 @@ MIN_REQUEST_INTERVAL = 1.1
 NOMINATIM_MIN_INTERVAL = 1.0
 # Simple in-process cache TTL (seconds); never exceed 7 days (604 800 s)
 CACHE_TTL = 3_600  # 1 hour
-# Nominatim geocode cache TTL — city name → bbox; reuse to avoid repeat requests
+# Nominatim geocode cache TTL — city name → coords; reuse to avoid repeat requests
 NOMINATIM_GEOCODE_TTL = 86_400  # 24 hours; city locations do not change
 
 # Global Nominatim rate-limit clock — shared across all OverpassProvider instances
@@ -72,8 +73,24 @@ NOMINATIM_GEOCODE_TTL = 86_400  # 24 hours; city locations do not change
 _nominatim_last_request: float = 0.0
 _nominatim_lock: asyncio.Lock | None = None  # initialised lazily; must be in an event loop
 
-# Global Nominatim geocode cache: location string → (bbox, timestamp)
-_nominatim_geocode_cache: dict[str, tuple[tuple[float, float, float, float], float]] = {}
+# Global Nominatim geocode cache: location string → (coords (lat, lon), timestamp)
+_nominatim_geocode_cache: dict[str, tuple[tuple[float, float], float]] = {}
+
+
+def haversine_distance_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance between two points on Earth in metres."""
+    r = 6_371_000.0  # Earth radius in metres
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+    )
+    c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
+    return r * c
 
 
 async def _nominatim_rate_limit() -> None:
@@ -215,8 +232,51 @@ def _osm_tags_to_category(tags: dict[str, str]) -> str | None:
     return None
 
 
+def is_valid_business_element(element: dict[str, Any]) -> bool:
+    """
+    Validate whether an OSM element is an actual business or commercial POI.
+    Strictly filters out roads, ways, railways, natural boundaries, bus stops, and infrastructure.
+    """
+    tags: dict[str, str] = element.get("tags", {})
+    name = tags.get("name") or tags.get("brand") or tags.get("operator")
+    if not name:
+        return False
+
+    # Commercial classification tags
+    has_commercial_tag = any(
+        k in tags
+        for k in (
+            "amenity", "shop", "office", "craft", "tourism",
+            "leisure", "healthcare", "commercial", "brand", "operator"
+        )
+    )
+
+    # Reject road ways and transport infrastructure
+    highway = tags.get("highway")
+    if highway:
+        # A road or street is NOT a business unless it carries a specific business amenity/shop/office
+        if not any(k in tags for k in ("shop", "office", "craft")):
+            amenity = tags.get("amenity")
+            if amenity not in ("restaurant", "cafe", "fast_food", "fuel", "bar", "pub", "pharmacy", "bank"):
+                return False
+
+    # Reject non-business infrastructure
+    if any(k in tags for k in ("railway", "waterway", "natural", "boundary", "barrier", "traffic_calming")):
+        if not has_commercial_tag:
+            return False
+
+    # Reject geographic boundaries, suburbs, or cities
+    if "place" in tags and not has_commercial_tag:
+        return False
+
+    return True
+
+
 def _osm_element_to_business(element: dict[str, Any]) -> Business | None:
-    """Convert a raw Overpass API element to a Business.  Returns None if unusable."""
+    """Convert a raw Overpass API element to a Business.  Returns None if unusable or non-business."""
+    if not is_valid_business_element(element):
+        return None
+
     tags: dict[str, str] = element.get("tags", {})
 
     name = tags.get("name") or tags.get("brand") or tags.get("operator")
@@ -264,6 +324,7 @@ def _osm_element_to_business(element: dict[str, Any]) -> Business | None:
         website=tags.get("website") or tags.get("contact:website") or tags.get("url"),
         source="openstreetmap",
         is_ai_generated=False,
+        osm_tags=tags,
     )
 
 
@@ -291,6 +352,10 @@ def _nominatim_element_to_business(element: dict[str, Any]) -> Business | None:
     osm_type = element.get("osm_type")
     osm_id = element.get("osm_id")
     if not osm_type or not osm_id:
+        return None
+
+    cat_class = element.get("category") or element.get("class", "")
+    if cat_class in ("highway", "boundary", "place", "waterway", "railway", "natural"):
         return None
 
     name = element.get("name")
@@ -342,7 +407,6 @@ def _nominatim_element_to_business(element: dict[str, Any]) -> Business | None:
     )
 
     cat_type = element.get("type", "")
-    cat_class = element.get("category") or element.get("class", "")
     category = None
     if cat_class:
         category = _osm_tags_to_category({cat_class: cat_type})
@@ -369,12 +433,29 @@ def _nominatim_element_to_business(element: dict[str, Any]) -> Business | None:
         website=website,
         source="openstreetmap",
         is_ai_generated=False,
+        osm_tags={"class": cat_class, "type": cat_type, **extratags},
     )
 
 
-def _cache_key(query: str, location: str | None, category: str | None, limit: int) -> str:
+def _cache_key(
+    query: str,
+    location: str | None,
+    category: str | None,
+    limit: int,
+    lat: float | None = None,
+    lon: float | None = None,
+    radius: int | None = None,
+) -> str:
     raw = json.dumps(
-        {"q": query, "loc": location, "cat": category, "lim": limit},
+        {
+            "q": query,
+            "loc": location,
+            "cat": category,
+            "lim": limit,
+            "lat": lat,
+            "lon": lon,
+            "rad": radius,
+        },
         sort_keys=True,
     )
     return hashlib.md5(raw.encode()).hexdigest()  # noqa: S324 — non-crypto use
@@ -411,53 +492,78 @@ class OverpassProvider:
             if fallback_endpoints is not None
             else list(OVERPASS_FALLBACK_ENDPOINTS)
         )
+        self.last_search_center: dict[str, float] | None = None
+        self.last_radius_meters: int | None = None
 
     # ── Public interface ──────────────────────────────────────────────────────
 
     async def search(
         self,
         query: str,
-        location: str | None,
-        category: str | None,
-        limit: int,
+        location: str | None = None,
+        category: str | None = None,
+        limit: int = 10,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_meters: int | None = None,
+        wider_metro: bool = False,
+        **kwargs: Any,
     ) -> list[Business]:
         """Search OSM for businesses matching the query near the location."""
-        if not location:
-            logger.warning("No location provided; skipping OSM search.")
+        if not location and (latitude is None or longitude is None):
+            logger.warning("No location or coordinates provided; skipping OSM search.")
             return []
 
-        key = _cache_key(query, location, category, limit)
+        eff_radius = (
+            (radius_meters if radius_meters is not None else 25_000)
+            if wider_metro
+            else (radius_meters if radius_meters is not None else self.radius_m)
+        )
+        eff_radius = min(eff_radius, MAX_RADIUS_M)
+
+        center_and_bbox = await self._resolve_center_and_bbox(
+            location=location,
+            latitude=latitude,
+            longitude=longitude,
+            radius_m=eff_radius,
+        )
+        if center_and_bbox is None:
+            logger.warning("Could not geocode location '%s'; skipping OSM search.", location)
+            return []
+
+        center, bbox = center_and_bbox
+        center_lat, center_lon = center
+        self.last_search_center = {"latitude": center_lat, "longitude": center_lon}
+        self.last_radius_meters = eff_radius
+
+        key = _cache_key(query, location, category, limit, center_lat, center_lon, eff_radius)
         cached = self._get_cache(key)
         if cached is not None:
             logger.debug("Cache hit for key %s", key)
             return cached
 
-        bbox = await self._resolve_bbox(location)
-        if bbox is None:
-            logger.warning("Could not geocode location '%s'; skipping OSM search.", location)
-            return []
-
-        businesses: list[Business] = []
+        raw_businesses: list[Business] = []
         overpass_err: Exception | None = None
 
         # 1. Attempt Overpass query
         try:
-            businesses = await self._run_overpass(
-                query=query, category=category, bbox=bbox, limit=limit
+            raw_businesses = await self._run_overpass(
+                query=query, category=category, bbox=bbox, limit=limit * 2
             )
         except Exception as exc:  # noqa: BLE001
             overpass_err = exc
             logger.warning("Overpass search failed (%s); trying Nominatim fallback.", exc)
 
         # 2. If Overpass failed or returned no results, fall back to Nominatim live search
-        if not businesses:
+        if not raw_businesses:
             try:
-                businesses = await self._search_nominatim(
+                raw_businesses = await self._search_nominatim(
                     query=query,
-                    location=location,
+                    location=location or f"{center_lat},{center_lon}",
                     category=category,
-                    limit=limit,
+                    limit=limit * 2,
                     bbox=bbox,
+                    center=center,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Nominatim live business search failed: %s", exc)
@@ -466,8 +572,33 @@ class OverpassProvider:
                         f"OpenStreetMap search failed (Overpass: {overpass_err}; Nominatim: {exc})"
                     ) from overpass_err
 
-        self._set_cache(key, businesses)
-        return businesses
+        # 3. Calculate distance and strictly enforce radius
+        filtered: list[Business] = []
+        for biz in raw_businesses:
+            if biz.latitude is not None and biz.longitude is not None:
+                dist_m = haversine_distance_meters(center_lat, center_lon, biz.latitude, biz.longitude)
+                biz.distance_meters = round(dist_m, 1)
+                biz.distance_km = round(dist_m / 1000.0, 2)
+            else:
+                dist_m = None
+
+            # Enforce radius limit strictly unless wider_metro=True
+            if not wider_metro and dist_m is not None:
+                if dist_m > eff_radius:
+                    logger.debug(
+                        "Excluding candidate '%s': %.1fm exceeds search radius %dm.",
+                        biz.name,
+                        dist_m,
+                        eff_radius,
+                    )
+                    continue
+
+            filtered.append(biz)
+            if len(filtered) >= limit:
+                break
+
+        self._set_cache(key, filtered)
+        return filtered
 
     async def get_details(self, business_id: str) -> Business | None:
         """Look up a single OSM element by its leadintel ID (osm_<type>_<id>)."""
@@ -539,30 +670,44 @@ out body center;
                 pass
         return None
 
-    async def _resolve_bbox(
-        self, location: str | None
-    ) -> tuple[float, float, float, float] | None:
-        """Return (south, west, north, east) bounding box for a location string."""
+    async def _resolve_center_and_bbox(
+        self,
+        location: str | None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_m: int | None = None,
+    ) -> tuple[tuple[float, float], tuple[float, float, float, float]] | None:
+        """
+        Resolve (center_lat, center_lon) and (south, west, north, east) bbox.
+        """
+        r = radius_m if radius_m is not None else self.radius_m
+
+        # Explicit coordinates
+        if latitude is not None and longitude is not None:
+            lat = float(latitude)
+            lon = float(longitude)
+            return (lat, lon), self._bbox_around(lat, lon, r)
+
         if not location:
-            # No location → world-wide search is too broad; signal caller
             return None
 
-        # Accept raw "lat,lon" coordinates
+        # Location string is "lat,lon"
         coords = self._parse_coordinates(location)
         if coords:
-            return self._bbox_around(coords[0], coords[1])
+            lat, lon = coords
+            return (lat, lon), self._bbox_around(lat, lon, r)
 
-        # Check geocode cache (24h TTL) before hitting Nominatim
-        cached_entry = _nominatim_geocode_cache.get(location)
+        # Geocode cache
+        loc_key = location.lower().strip()
+        cached_entry = _nominatim_geocode_cache.get(loc_key)
         if cached_entry is not None:
-            bbox, ts = cached_entry
+            (lat, lon), ts = cached_entry
             if time.monotonic() - ts < NOMINATIM_GEOCODE_TTL:
                 logger.debug("Nominatim geocode cache hit for '%s'.", location)
-                return bbox
-            else:
-                del _nominatim_geocode_cache[location]
+                return (lat, lon), self._bbox_around(lat, lon, r)
+            del _nominatim_geocode_cache[loc_key]
 
-        # Geocode via Nominatim — enforce global rate limit
+        # Nominatim geocode request
         params = {
             "q": location,
             "format": "json",
@@ -583,22 +728,29 @@ out body center;
             top = results[0]
             lat = float(top["lat"])
             lon = float(top["lon"])
-            # Always center bounding box on geocoded coordinates with configured radius_m
-            # to keep queries fast and avoid multi-gigabyte city administrative bounding boxes
-            bbox = self._bbox_around(lat, lon)
-            _nominatim_geocode_cache[location] = (bbox, time.monotonic())
-            return bbox
+            _nominatim_geocode_cache[loc_key] = ((lat, lon), time.monotonic())
+            return (lat, lon), self._bbox_around(lat, lon, r)
 
         except Exception as exc:
             logger.warning("Nominatim geocoding failed for '%s': %s", location, exc)
             return None
 
+    async def _resolve_bbox(
+        self, location: str | None
+    ) -> tuple[float, float, float, float] | None:
+        """Return (south, west, north, east) bounding box for a location string."""
+        res = await self._resolve_center_and_bbox(location)
+        if res is not None:
+            return res[1]
+        return None
+
     def _bbox_around(
-        self, lat: float, lon: float
+        self, lat: float, lon: float, radius_m: int | None = None
     ) -> tuple[float, float, float, float]:
-        """Create a square bounding box of self.radius_m around (lat, lon)."""
-        delta_lat = self.radius_m / 111_320
-        delta_lon = self.radius_m / (111_320 * abs(__import__("math").cos(__import__("math").radians(lat))) or 1)
+        """Create a square bounding box of radius_m around (lat, lon)."""
+        r = radius_m if radius_m is not None else self.radius_m
+        delta_lat = r / 111_320
+        delta_lon = r / (111_320 * abs(math.cos(math.radians(lat))) or 1)
         return (
             lat - delta_lat,
             lon - delta_lon,
@@ -615,6 +767,7 @@ out body center;
         category: str | None,
         limit: int,
         bbox: tuple[float, float, float, float] | None = None,
+        center: tuple[float, float] | None = None,
     ) -> list[Business]:
         """Direct OpenStreetMap search via Nominatim when Overpass is unavailable."""
         await _nominatim_rate_limit()
@@ -636,15 +789,21 @@ out body center;
             "extratags": 1,
         }
 
-        coords = self._parse_coordinates(location)
-        if coords:
-            lat, lon = coords
-            s, w, n, e = self._bbox_around(lat, lon)
+        if bbox is not None:
+            s, w, n, e = bbox
             params["viewbox"] = f"{w},{s},{e},{n}"
             params["bounded"] = 1
             params["q"] = primary_term
         else:
-            params["q"] = f"{primary_term} in {location}"
+            coords = self._parse_coordinates(location)
+            if coords:
+                lat, lon = coords
+                s, w, n, e = self._bbox_around(lat, lon)
+                params["viewbox"] = f"{w},{s},{e},{n}"
+                params["bounded"] = 1
+                params["q"] = primary_term
+            else:
+                params["q"] = f"{primary_term} in {location}"
 
         headers = {
             "User-Agent": USER_AGENT,

@@ -197,7 +197,9 @@ def export_to_excel(
     ws_leads = wb.create_sheet(title="Business Leads")
     lead_headers = [
         "Business Name", "Category", "Address", "City", "State", "Country",
-        "Phone", "Email", "Website", "Social Profiles", "Data Source"
+        "Phone", "Email", "Website", "Website Status", "Opportunity Score",
+        "CMS", "Contact Route", "Distance (km)",
+        "Social Profiles", "Data Source"
     ]
     _style_headers(ws_leads, lead_headers)
 
@@ -212,6 +214,11 @@ def export_to_excel(
             b.get("phone"),
             b.get("email"),
             b.get("website"),
+            b.get("website_status"),
+            b.get("website_opportunity_score"),
+            b.get("detected_cms"),
+            b.get("has_contact_route"),
+            b.get("distance_km"),
             b.get("social_profiles") or b.get("linkedin_url"),
             b.get("source", "openstreetmap"),
         ]

@@ -1,6 +1,6 @@
 [project]
 name = "leadintel"
-version = "0.1.1"
+version = "0.3.0"
 description = "Free, open-source MCP server for AI-powered B2B lead generation and business intelligence."
 readme = "README.md"
 license = "MIT"

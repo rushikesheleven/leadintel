@@ -29,7 +29,7 @@ LeadIntel is structured into clean, decoupled layers:
 graph TD
     Client["MCP Clients (Claude Desktop / Antigravity / Cursor)"] --> MCP["LeadIntel MCP Server (stdio transport)"]
 
-    subgraph "LeadIntel Tools (13 Registered MCP Tools)"
+    subgraph "LeadIntel Tools (14 Registered MCP Tools)"
         T1["search_businesses"]
         T2["get_business_details"]
         T3["find_business_website"]
@@ -43,9 +43,10 @@ graph TD
         T11["generate_outreach"]
         T12["generate_business_report"]
         T13["export_leads"]
+        T14["get_saved_leads"]
     end
 
-    MCP --> T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10 & T11 & T12 & T13
+    MCP --> T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10 & T11 & T12 & T13 & T14
 
     subgraph "Core Services & Providers"
         P_OSM["OpenStreetMap / Overpass Provider"]
@@ -58,6 +59,7 @@ graph TD
         S_Ollama["Local AI Service (Ollama HTTP Client)"]
         S_Export["OpenPyXL Multi-Sheet Excel & CSV Exporter"]
         S_Report["Executive Report Generator (MD / HTML / JSON)"]
+        S_DB["Local SQLite Persistence (.leadintel.db)"]
     end
 
     T1 & T2 & T3 --> P_OSM & P_Demo
@@ -67,17 +69,18 @@ graph TD
     T10 & T11 --> S_Ollama
     T12 --> S_Report
     T13 --> S_Export
+    T1 & T14 --> S_DB
 ```
 
 ---
 
 ## Registered MCP Tools
 
-LeadIntel provides 13 registered MCP tools:
+LeadIntel provides 14 registered MCP tools:
 
 | # | Tool Name | Description | Key Inputs |
 |---|---|---|---|
-| 1 | `search_businesses` | Discover local businesses via OpenStreetMap / Overpass API with automatic demo fallback | `query`, `location`, `category`, `limit` |
+| 1 | `search_businesses` | Discover local businesses, identify website opportunities, calculate distance, and prioritize leads | `query`, `location`, `category`, `limit`, `latitude`, `longitude`, `radius_meters`, `sort_by`, `research_websites`, `wider_metro` |
 | 2 | `get_business_details` | Retrieve full coordinates, address, and contact details for a specific business | `business_id` |
 | 3 | `find_business_website` | Discover and verify official websites using search heuristics and OSM tags | `business_name`, `location`, `category` |
 | 4 | `analyze_website` | Audit web availability, HTTPS, SSL validity, viewport, headings, and broken links | `url`, `check_broken_links` |
@@ -90,6 +93,40 @@ LeadIntel provides 13 registered MCP tools:
 | 11 | `generate_outreach` | Local AI multi-channel outreach pitches (Cold Email, LinkedIn connection, WhatsApp message) | `business_name`, `service_focus`, `contact_name` |
 | 12 | `generate_business_report` | Multi-format executive intelligence report (Markdown, styled HTML, or JSON) across 12 sections | `business_info`, `lead_score_data`, `output_format` |
 | 13 | `export_leads` | Search and export leads to multi-sheet formatted Excel (`.xlsx`), CSV, or JSON | `query`, `location`, `format`, `output_path` |
+| 14 | `get_saved_leads` | Retrieve and filter previously researched businesses from the local database | `min_opportunity_score`, `limit` |
+
+---
+
+## Website Opportunity Intelligence (v0.2.0 - v0.3.0)
+
+LeadIntel is specifically engineered for digital marketing agencies, SEO professionals, and web developers seeking high-probability web development and redesign clients.
+
+### 1. Website Status Lifecycle
+Every discovered business receives an explicit, deterministic `website_status`:
+- `website_verified`: Official company website confirmed active, accessible, and owned by the entity.
+- `website_not_found_after_research`: Missing from OpenStreetMap and confirmed absent after secondary web research across search engines and directory listings.
+- `website_broken`: Website URL exists but returns HTTP 4xx/5xx errors or network timeouts.
+- `website_unverified`: Discovered domain name does not match the business identity.
+- `website_not_checked`: OpenStreetMap website field was empty and web research was not requested.
+
+### 2. Deterministic Opportunity Scoring & Tech Stack Detection
+`website_opportunity_score` (0–100) deterministically ranks web agency outreach leverage:
+1. **No website found after research**: 90–100 (default: 95.0) — Highest priority new-build prospects.
+2. **Broken websites**: 75–89 (default: 80.0) — Urgent repair / redesign prospects.
+3. **Weak / outdated websites**: 50–74 (default: 65.0) — Missing mobile viewport or modern SSL security.
+4. **Significant SEO deficiencies**: 30–49 (default: 40.0) — Missing meta descriptions, title tags, or slow response times.
+5. **Modern, established websites**: 5–29 (default: 15.0) — Fast, mobile-ready, HTTPS-secured.
+
+- **Tech Stack & Contact Surface detection**: Automated HTML footprint analysis detects underlying CMS platforms (WordPress, Shopify, Wix, Squarespace) and verifies whether direct contact routes (`<a href="...">` with contact, about, or `mailto:`) exist.
+
+### 3. Geographic Precision & Distance
+- **Spherical Haversine calculation**: Every lead includes exact `distance_meters` and `distance_km` from the search centre.
+- **Strict radius enforcement**: Rejects distant municipalities (e.g. Alandi or PCMC when searching Pune city center).
+- **Urban core vs. wider metro**: Standard 6 km urban core radius, with optional `wider_metro=True` (25 km) for full metropolitan exploration.
+- **Road & infrastructure rejection**: Rejects highway ways, bus platforms, and non-commercial geographic objects.
+
+### 4. Local Storage
+Researched businesses from `search_businesses` are automatically persisted to a local `.leadintel.db` SQLite database using upsert semantics. This preserves historical search intelligence across MCP sessions, speeds up pipeline reviews, and prevents redundant external API and scraping calls. Stored leads can be queried directly at any time using the `get_saved_leads` tool.
 
 ---
 

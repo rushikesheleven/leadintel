@@ -8,7 +8,7 @@ provider directly, so swapping or adding providers requires zero tool changes.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..models.business import Business
 
@@ -26,9 +26,10 @@ class BusinessProvider(Protocol):
     async def search(
         self,
         query: str,
-        location: str | None,
-        category: str | None,
-        limit: int,
+        location: str | None = None,
+        category: str | None = None,
+        limit: int = 10,
+        **kwargs: Any,
     ) -> list[Business]:
         """
         Search for businesses.

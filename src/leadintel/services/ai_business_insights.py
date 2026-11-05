@@ -35,18 +35,25 @@ STRICT CONSTRAINTS:
 
 SYSTEM_PROMPT_OUTREACH = """You are an expert B2B digital agency consultant writing personalized, respectful, and highly specific outreach messages to a business decision maker.
 
-STRICT CONSTRAINTS:
-1. Do not use generic buzzwords or clickbait claims.
-2. Directly reference 1-2 verified, specific digital findings (e.g., website loading speed, lack of mobile viewport, missing meta descriptions, or competitor gap).
-3. Propose a collaborative, value-first conversation without assuming their budget or readiness to buy.
-4. Generate three distinct channels: Email Pitch, LinkedIn Message, and WhatsApp Business message.
-5. Output valid JSON.
+STRICT CONSTRAINTS & GUARDRAILS:
+1. Do not fabricate business data or website problems. Base the outreach strictly on the provided website_opportunity_explanation.
+2. If the site is missing (website_not_found_after_research), pitch a new build.
+3. If a CMS is detected or a contact route is missing, mention it as a specific reason for outreach.
+4. Do not use generic buzzwords or clickbait claims.
+5. Propose a collaborative, value-first conversation without assuming their budget or readiness to buy.
+6. Generate three distinct channels: Email Pitch, LinkedIn Message, and WhatsApp Business message.
+7. Output valid JSON.
 """
 
 
 def _build_context_summary(
     business_name: str,
     business_category: Optional[str] = None,
+    website_status: Optional[str] = None,
+    website_opportunity_score: Optional[float] = None,
+    website_opportunity_explanation: Optional[str] = None,
+    detected_cms: Optional[str] = None,
+    has_contact_route: Optional[bool] = None,
     website_analysis: Optional[dict[str, Any]] = None,
     seo_audit: Optional[dict[str, Any]] = None,
     social_profiles: Optional[dict[str, Any]] = None,
@@ -59,6 +66,21 @@ def _build_context_summary(
         "business_name": business_name,
         "category": business_category or "Unspecified",
     }
+
+    website_opp: dict[str, Any] = {}
+    if website_status:
+        website_opp["website_status"] = website_status
+    if website_opportunity_score is not None:
+        website_opp["website_opportunity_score"] = website_opportunity_score
+    if website_opportunity_explanation:
+        website_opp["website_opportunity_explanation"] = website_opportunity_explanation
+    if detected_cms:
+        website_opp["detected_cms"] = detected_cms
+    if has_contact_route is not None:
+        website_opp["has_contact_route"] = has_contact_route
+
+    if website_opp:
+        verified_facts["website_opportunity_and_tech"] = website_opp
 
     if contact_info:
         verified_facts["contact"] = {
@@ -195,6 +217,11 @@ Required JSON schema:
 async def generate_ai_outreach(
     business_name: str,
     business_category: Optional[str] = None,
+    website_status: Optional[str] = None,
+    website_opportunity_score: Optional[float] = None,
+    website_opportunity_explanation: Optional[str] = None,
+    detected_cms: Optional[str] = None,
+    has_contact_route: Optional[bool] = None,
     website_analysis: Optional[dict[str, Any]] = None,
     seo_audit: Optional[dict[str, Any]] = None,
     social_profiles: Optional[dict[str, Any]] = None,
@@ -216,6 +243,11 @@ async def generate_ai_outreach(
     verified_data = _build_context_summary(
         business_name=business_name,
         business_category=business_category,
+        website_status=website_status,
+        website_opportunity_score=website_opportunity_score,
+        website_opportunity_explanation=website_opportunity_explanation,
+        detected_cms=detected_cms,
+        has_contact_route=has_contact_route,
         website_analysis=website_analysis,
         seo_audit=seo_audit,
         social_profiles=social_profiles,
@@ -226,6 +258,11 @@ async def generate_ai_outreach(
 
     prompt = f"""Generate personalized, professional B2B outreach messages for {business_name} in JSON format.
 Sender: {sender_name} representing {agency_name}.
+
+STRICT GUARDRAILS:
+- Do not fabricate business data or website problems. Base the outreach strictly on the provided website_opportunity_explanation.
+- If the site is missing (website_not_found_after_research), pitch a new build.
+- If a CMS is detected or a contact route is missing, mention it as a specific reason for outreach.
 
 VERIFIED CONTEXT:
 {json.dumps(verified_data, indent=2)}

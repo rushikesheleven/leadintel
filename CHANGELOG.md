@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-11-05
+
+### Added
+- **Local SQLite Database Persistence**:
+  - Implemented persistent local storage in `src/leadintel/storage/db.py` using Python's standard library `sqlite3`.
+  - Researched businesses from `search_businesses` are automatically upserted to `.leadintel.db` with UTC timestamps.
+  - Added new MCP tool #14: `get_saved_leads` allowing users and AI clients to query previously researched leads, filter by minimum opportunity score, and set pagination limits.
+- **CMS & Tech Stack Detection**:
+  - Added automated HTML footprint analysis detecting common content management systems: WordPress (`wp-content`), Shopify (`cdn.shopify.com`), Wix (`wix.com` / `wixsite`), and Squarespace (`squarespace`).
+  - Stored in `detected_cms` field on the `Business` model and surfaced in Excel and CSV exports.
+- **Contact Route Detection**:
+  - Scans anchor tags for contact routes (`contact`, `about`, `mailto:`), setting `has_contact_route` (`True`/`False`).
+  - Enriches `website_opportunity_explanation` with specific actionable details (e.g., "Built on WordPress. Missing a clear contact page.").
+- **Resilience, Global Timeouts & Memory Protection**:
+  - Implemented streaming HTTP response processing (`aiter_bytes`) with a strict 200,000-byte cap to eliminate memory exhaustion vulnerabilities on oversized external websites.
+  - Added connection limits (`max_keepalive_connections=5`, `max_connections=10`) and a global 20-second timeout in batch website evaluations to prevent MCP tool timeouts.
+- **Outreach Engine Guardrails & Integration**:
+  - Updated `generate_outreach` to retrieve and ground messaging in stored `Business` records.
+  - Added strict guardrails to prevent hallucination of business data, ensuring outreach references verified opportunity explanations, missing website status, or detected CMS/contact gaps.
+
+### Changed
+- Expanded registered MCP tools from 13 to 14 (`get_saved_leads`).
+- Updated CSV and Excel exporters to include `detected_cms` ("CMS") and `has_contact_route` ("Contact Route").
+- Bumped version to `0.3.0` across `pyproject.toml`, `src/leadintel/__init__.py`, and `src/leadintel/server.py`.
+
+---
+
+## [0.2.0] - 2026-11-05
+
+### Added
+- **Website Opportunity Identification & Digital Verification**:
+  - Added `website_status` field with explicit, deterministic states:
+    `website_verified`, `website_not_found_after_research`, `website_unverified`,
+    `website_broken`, `website_not_checked`.
+  - Missing OSM website fields are never automatically assumed to mean "no website"; web research
+    is performed through respectful search queries before drawing conclusions.
+  - Added comprehensive directory and aggregator detection covering global platforms (Yelp, TripAdvisor,
+    YellowPages) and regional Indian platforms (Justdial, Sulekha, Indiamart, Zomato, Swiggy, Magicpin).
+  - Added domain ownership verification (`is_domain_belonging_to_business`) using token-overlap matching
+    to prevent unrelated search results from being wrongly assigned to businesses.
+  - Safe HTTP accessibility testing with SSL validity check, response timing, and mobile viewport inspection.
+- **Website Opportunity Scoring & Multi-Criteria Ranking**:
+  - Deterministic 0–100 `website_opportunity_score` prioritizing web development outreach:
+    - No website found after research: 90–100 (default: 95.0)
+    - Broken website: 75–89 (default: 80.0)
+    - Weak / outdated website: 50–74 (default: 65.0)
+    - Significant SEO problems: 30–49 (default: 40.0)
+    - Good website: 5–29 (default: 15.0)
+  - Sorting strategies in `search_businesses`: `highest_website_opportunity` (default), `closest`,
+    `highest_lead_score`, `best_seo_opportunity`.
+  - Added `ranking_explanation` to every business record so Claude can explain why each lead was ranked.
+  - Added evidence-based `data_confidence` metric (0.0 to 1.0) reflecting data completeness and verification.
+- **Geographic Precision & Strict Radius Enforcement**:
+  - Implemented `haversine_distance_meters` for great-circle distance calculation.
+  - Support for explicit `latitude` and `longitude` coordinate parameters in `search_businesses`.
+  - Support for configurable `radius_meters` (defaulting to 6,000m urban core).
+  - Strict radius filtering applied to both Overpass and Nominatim fallback results; businesses outside
+    the requested radius are filtered out, solving the Pune search anomaly where distant towns like
+    Alandi (18 km away) and Pimpri-Chinchwad (14+ km away) appeared in central Pune searches.
+  - Added `wider_metro` flag (default False) allowing users to explicitly request wider metropolitan coverage (25 km).
+  - Calculated and exposed `distance_meters` and `distance_km` on all business records.
+- **Category Accuracy & Infrastructure False-Positive Rejection**:
+  - Added `is_valid_business_element` rejecting road ways (`highway=primary`, `highway=residential`),
+    bus platforms, railways, waterways, and natural features.
+  - Expanded restaurant/food category queries to cover restaurants, cafes, fast food, bakeries, bars, and pubs.
+  - Preserved raw OpenStreetMap tags in `osm_tags` for transparency.
+- **Data Export Enhancements**:
+  - Added `Website Status`, `Web Opportunity Score`, and `Distance (km)` columns to Excel and CSV exporters.
+
+### Changed
+- Preserved all 13 MCP tools with 100% backward compatibility for existing callers.
+- Updated `Business` model to include v0.2.0 fields.
+- Updated `BusinessSearchResult` to include `search_center`, `radius_meters`, and `sort_by`.
+
+---
+
 ## [0.1.1] - 2026-11-04
 
 ### Fixed

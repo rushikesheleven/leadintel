@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+WebsiteStatus = Literal[
+    "website_verified",
+    "website_not_found_after_research",
+    "website_unverified",
+    "website_broken",
+    "website_not_checked",
+]
 
 
 class Business(BaseModel):
@@ -24,11 +32,47 @@ class Business(BaseModel):
     postal_code: Optional[str] = Field(default=None)
     latitude: Optional[float] = Field(default=None)
     longitude: Optional[float] = Field(default=None)
+    distance_meters: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Calculated distance in metres from the search center coordinates",
+    )
+    distance_km: Optional[float] = Field(
+        default=None,
+        ge=0,
+        description="Calculated distance in kilometres from search center",
+    )
 
-    # Contact
+    # Contact & Digital Presence
     phone: Optional[str] = Field(default=None)
     email: Optional[str] = Field(default=None)
     website: Optional[str] = Field(default=None)
+    website_status: WebsiteStatus = Field(
+        default="website_not_checked",
+        description=(
+            "Verification status of the business website. One of: "
+            "'website_verified', 'website_not_found_after_research', "
+            "'website_unverified', 'website_broken', 'website_not_checked'."
+        ),
+    )
+    website_opportunity_score: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Deterministic 0–100 score prioritizing web dev opportunity for agencies",
+    )
+    website_opportunity_explanation: Optional[str] = Field(
+        default=None,
+        description="Evidence-based explanation of the website opportunity score",
+    )
+    detected_cms: Optional[str] = Field(
+        default=None,
+        description="Detected CMS like WordPress, Shopify, Wix",
+    )
+    has_contact_route: Optional[bool] = Field(
+        default=None,
+        description="True if a contact page or mailto link was found",
+    )
 
     # Social
     linkedin_url: Optional[str] = Field(default=None)
@@ -63,6 +107,20 @@ class Business(BaseModel):
         default=False,
         description="True when any field value was produced by an AI model",
     )
+    data_confidence: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Confidence indicator for data completeness and verification",
+    )
+    osm_tags: Optional[dict[str, str]] = Field(
+        default=None,
+        description="Preserved raw OpenStreetMap tags for transparency and auditability",
+    )
+    ranking_explanation: Optional[str] = Field(
+        default=None,
+        description="Human-readable explanation of why this business was ranked in this search position",
+    )
 
     model_config = ConfigDict()
 
@@ -89,6 +147,18 @@ class BusinessSearchResult(BaseModel):
     query: str
     location: Optional[str] = None
     category: Optional[str] = None
+    search_center: Optional[dict[str, float]] = Field(
+        default=None,
+        description="Resolved search center coordinates {'latitude': lat, 'longitude': lon}",
+    )
+    radius_meters: Optional[int] = Field(
+        default=None,
+        description="Search radius in metres applied around search center",
+    )
+    sort_by: Optional[str] = Field(
+        default=None,
+        description="Applied ranking criterion (e.g. 'highest_website_opportunity', 'closest')",
+    )
     total_found: int = 0
     businesses: list[Business] = Field(default_factory=list)
     source: str = "demo"

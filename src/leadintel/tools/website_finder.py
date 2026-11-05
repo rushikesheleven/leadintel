@@ -23,35 +23,19 @@ import httpx
 
 from ..config import settings
 from ..providers import build_registry
+from ..services.website_opportunity import (
+    DIRECTORY_AND_AGGREGATOR_DOMAINS,
+    SOCIAL_DOMAINS,
+    is_directory_or_social_domain,
+)
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = "LeadIntel/0.1 (Business Intelligence Researcher; open-source; respectful crawler)"
+USER_AGENT = "LeadIntel/0.2.0 (Business Intelligence Researcher; open-source; respectful crawler)"
 _registry = build_registry(settings)
 
 # Domains to ignore when seeking a company's direct website
-IGNORED_DOMAINS = {
-    "google.com",
-    "www.google.com",
-    "maps.google.com",
-    "facebook.com",
-    "www.facebook.com",
-    "instagram.com",
-    "www.instagram.com",
-    "twitter.com",
-    "x.com",
-    "linkedin.com",
-    "www.linkedin.com",
-    "yelp.com",
-    "www.yelp.com",
-    "tripadvisor.com",
-    "www.tripadvisor.com",
-    "yellowpages.com",
-    "wikipedia.org",
-    "en.wikipedia.org",
-    "crunchbase.com",
-    "glassdoor.com",
-}
+IGNORED_DOMAINS = DIRECTORY_AND_AGGREGATOR_DOMAINS | SOCIAL_DOMAINS
 
 
 def _clean_url(url: str) -> Optional[str]:
@@ -67,7 +51,7 @@ def _clean_url(url: str) -> Optional[str]:
         domain = parsed.netloc.lower()
         if not domain or "." not in domain:
             return None
-        if domain in IGNORED_DOMAINS:
+        if is_directory_or_social_domain(domain) or domain in IGNORED_DOMAINS:
             return None
         return f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
     except Exception:
